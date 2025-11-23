@@ -1,6 +1,7 @@
 from manim import *
 import random
 import numpy as np
+import cv2
 random.seed(42)
 class CameraMove(ThreeDScene):
     def construct(self):
@@ -60,3 +61,69 @@ class CameraMove(ThreeDScene):
         self.play(cam_tracker.animate.set_value(1), run_time=8, rate_func=smooth)
         self.wait(1)
 
+class CannyDemo(Scene):
+    def construct(self):
+        # Load image
+        img_path = "ppt/apple.jpg"
+        img = cv2.imread(img_path)
+        if img is None:
+            raise ValueError(f"Could not load image: {img_path}")
+        
+        # Convert BGR to RGB for Manim
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Prepare all images
+        blurred = cv2.GaussianBlur(gray, (5, 5), 1.0)
+        blurred_rgb = np.stack([blurred] * 3, axis=-1)
+        
+        grad_x = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        gradient_magnitude = np.clip(gradient_magnitude, 0, 255).astype(np.uint8)
+        gradient_rgb = np.stack([gradient_magnitude] * 3, axis=-1)
+        
+        edges = cv2.Canny(blurred, 100, 200)
+        edges_rgb = np.stack([edges] * 3, axis=-1)
+        
+        # Create image mobjects
+        original_img = ImageMobject(img_rgb).set_height(4)
+        blurred_img = ImageMobject(blurred_rgb).set_height(4)
+        gradient_img = ImageMobject(gradient_rgb).set_height(4)
+        edges_img = ImageMobject(edges_rgb).set_height(4)
+        
+        # Create labels
+        original_label = Text("1. Original Image", font_size=36)
+        blurred_label = Text("2. Gaussian Blur (Noise Reduction)", font_size=36)
+        gradient_label = Text("3. Gradient Magnitude (Sobel)", font_size=36)
+        edges_label = Text("4. Canny Edges (Final Result)", font_size=36, color=YELLOW)
+        
+        # Position labels
+        for label in [original_label, blurred_label, gradient_label, edges_label]:
+            label.next_to(original_img, UP, buff=0.3)
+        
+        # Step 1: Original
+        self.play(FadeIn(original_img), Write(original_label))
+        self.wait(1)
+        
+        # Step 2: Blur
+        self.play(
+            ReplacementTransform(original_img, blurred_img),
+            ReplacementTransform(original_label, blurred_label)
+        )
+        self.wait(1)
+        
+        # Step 3: Gradient
+        self.play(
+            ReplacementTransform(blurred_img, gradient_img),
+            ReplacementTransform(blurred_label, gradient_label)
+        )
+        self.wait(1)
+        
+        # Step 4: Canny edges
+        self.play(
+            ReplacementTransform(gradient_img, edges_img),
+            ReplacementTransform(gradient_label, edges_label)
+        )
+        self.wait(1.5)
+        
