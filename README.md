@@ -1,7 +1,7 @@
 ## How to run?
 
 1. install uv
-2. see `go.bash` for example command.
+2. see `go.bash` for example command. Example: `uv run render.py --command render --fps 60 --num_objects 1000 --deceleration_rate 5.0 --img "ppt/loong2.png" --out "loong.mp4" --offset_ood_prop 0.6 --halo`
 
 ## 模糊边缘的数学原理
 
