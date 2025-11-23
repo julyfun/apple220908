@@ -2,8 +2,8 @@
 
 ```python
 mask = cairo.RadialGradient(x, y, radius * (1 - blur), x, y, radius)
-mask.add_color_stop_rgba(0, 1, 1, 1, 1)  # 中心：完全不透明
-mask.add_color_stop_rgba(1, 1, 1, 1, 0)  # 外围：完全透明
+mask.add_color_stop_rgba(0, 1, 1, 1, 1)  # Center: alpha = 1
+mask.add_color_stop_rgba(1, 1, 1, 1, 0)  # Outside: alpha = 0
 ```
 
 **径向渐变 (RadialGradient)** 定义两个同心圆：
@@ -12,13 +12,13 @@ mask.add_color_stop_rgba(1, 1, 1, 1, 0)  # 外围：完全透明
 
 在两圆之间，alpha 值从 1 线性插值到 0：
 
-\[
+$$
 \alpha(r) = \begin{cases}
 1 & r \leq r_{inner} \\
 \frac{r_{outer} - r}{r_{outer} - r_{inner}} & r_{inner} < r < r_{outer} \\
 0 & r \geq r_{outer}
 \end{cases}
-\]
+$$
 
 这创建了**软边缘**，避免硬切割，视觉上产生"模糊"或"发光"效果。
 
@@ -50,6 +50,12 @@ def draw_blurred_circle(cr, x, y, radius, blur=BLUR_AMOUNT):
     core_mask.add_color_stop_rgba(1, 1, 1, 1, 0)
     cr.set_source(core_mask)
     cr.paint()
+
+
+def draw_blurred_circle(cr, x, y, radius, blur=BLUR_AMOUNT):
+    1. Draw a large, faint glow (halo) using additive blending
+    
+    2. Draw a smaller, sharp core with a soft edge using normal blending
 ```
 
 **数学原理**：

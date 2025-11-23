@@ -5,6 +5,7 @@ import sys
 import cv2
 import numpy as np
 import tyro
+
 from dataclasses import dataclass
 
 # Camera transform (position, lookat, roll) - kept for cam_test only
@@ -17,7 +18,6 @@ class Config:
     """Unified configuration for all rendering functions."""
     # Command and mode
     command: str = "render"  # cam, glow, canny, or render
-    mode: str = "ray"  # For cam command: fix, x, or ray
     
     # Image dimensions
     width: int = 600
@@ -25,29 +25,37 @@ class Config:
     
     # Object parameters
     num_objects: int = 100
-    d_min: float = 4.0
-    d_max: float = 12.0
-    d_threshold: float = 8.0  # Will be calculated as d_min * 1.25 if not set
+    d_min: float = 0.6
+    d_max: float = 4.5
+    d_threshold: float = 1.0  # Will be calculated as d_min * 1.25 if not set
     eccentricity_min: float = 1.05
     eccentricity_max: float = 1.25
     
     # Rendering parameters
     blur_amount: float = 0.3
-    halo_radius_multiplier: float = 10
-    halo_intensity: float = 0.04
+    halo: bool = False
+    halo_radius_multiplier: float = 8
+    halo_intensity: float = 0.015
     
     # Camera parameters
     fov_h: float = 45.0  # degrees
     
     # Animation parameters
     img: str = "ppt/apple.jpg"  # Input image path
-    img_scale: float = 1.0
+    img_scale: float = 2.0
     fps: int = 10
     init_v: float = 0.3  # Initial velocity
-    offset_mode: str = "fix"  # fix, x, or ray
-    offset_radius: float = 1.5  # Offset radius for x and ray modes
-    deceleration_rate: float = 1.0  # Deceleration rate for last 30% (1.0 = normal, >1.0 = faster, <1.0 = slower)
-    arc_prop: float = 0.92
+    base_x: float = 2.0
+    offset_mode: str = "ray"  # fix, x, or ray
+    offset_radius: float = 1.8  # Offset radius for x and ray modes
+    offset_ood_prop: float = 0.8
+    offset_ood_close_prop: float = 0.3
+    offset_radius_ood: float = 4.0  # Offset radius for x and ray modes
+
+    const_speed_prop: float = 0.5
+    deceleration_rate: float = 5.0  # Deceleration rate for last 30% (1.0 = normal, >1.0 = faster, <1.0 = slower)
+    ax_offset: float = 0.12
+    sup: float = 1.0 # Avoid too big
     
     def __post_init__(self):
         """Calculate derived values."""
@@ -62,7 +70,7 @@ def get_color_values(color_type, weight):
         r, g, b = 0.85, 0.9, 1.0
     
     tint = 1.0 * weight
-    core_tint = 0.4 * weight
+    core_tint = 0.5 * weight
     core_r = r + (1 - r) * (1 - core_tint)
     core_g = g + (1 - g) * (1 - core_tint)
     core_b = b + (1 - b) * (1 - core_tint)
@@ -73,12 +81,13 @@ def draw_blurred_circle(cr, x, y, radius, cfg: Config, color_type="yellow", weig
     r, g, b, tint, core_r, core_g, core_b = get_color_values(color_type, weight)
     
     # Halo layer with color tint
-    cr.set_operator(cairo.OPERATOR_ADD)
-    halo_mask = cairo.RadialGradient(x, y, 0, x, y, radius * cfg.halo_radius_multiplier)
-    halo_mask.add_color_stop_rgba(0, r, g, b, cfg.halo_intensity * (1 + tint))
-    halo_mask.add_color_stop_rgba(1, r, g, b, 0)
-    cr.set_source(halo_mask)
-    cr.paint()
+    if cfg.halo:
+        cr.set_operator(cairo.OPERATOR_ADD)
+        halo_mask = cairo.RadialGradient(x, y, 0, x, y, radius * cfg.halo_radius_multiplier)
+        halo_mask.add_color_stop_rgba(0, r, g, b, cfg.halo_intensity * (1 + tint))
+        halo_mask.add_color_stop_rgba(1, r, g, b, 0)
+        cr.set_source(halo_mask)
+        cr.paint()
     
     # Core layer with subtle color
     cr.set_operator(cairo.OPERATOR_OVER)
@@ -97,12 +106,13 @@ def draw_blurred_ellipse(cr, x, y, radius, eccentricity, rotation, cfg: Config, 
     r, g, b, tint, core_r, core_g, core_b = get_color_values(color_type, weight)
     
     # Halo layer with color tint
-    cr.set_operator(cairo.OPERATOR_ADD)
-    halo_mask = cairo.RadialGradient(0, 0, 0, 0, 0, radius * cfg.halo_radius_multiplier)
-    halo_mask.add_color_stop_rgba(0, r, g, b, cfg.halo_intensity * (1 + tint))
-    halo_mask.add_color_stop_rgba(1, r, g, b, 0)
-    cr.set_source(halo_mask)
-    cr.paint()
+    if cfg.halo:
+        cr.set_operator(cairo.OPERATOR_ADD)
+        halo_mask = cairo.RadialGradient(0, 0, 0, 0, 0, radius * cfg.halo_radius_multiplier)
+        halo_mask.add_color_stop_rgba(0, r, g, b, cfg.halo_intensity * (1 + tint))
+        halo_mask.add_color_stop_rgba(1, r, g, b, 0)
+        cr.set_source(halo_mask)
+        cr.paint()
     
     # Core layer with subtle color
     cr.set_operator(cairo.OPERATOR_OVER)
@@ -251,11 +261,11 @@ def cam_test(cfg: Config):
             y, z = 0.5, random.uniform(-0.5, 0.5)
         
         # Step: Move point based on mode
-        if cfg.mode == "fix":
+        if cfg.offset_mode == "fix":
             x = 2.0
-        elif cfg.mode == "x":
+        elif cfg.offset_mode == "x":
             x = random.uniform(0.5, 3.5)
-        elif cfg.mode == "ray":
+        elif cfg.offset_mode == "ray":
             # Base position at x=2.0
             base_x = 2.0
             # Calculate direction vector from origin to base position
@@ -273,7 +283,7 @@ def cam_test(cfg: Config):
             else:
                 x = base_x
         else:
-            raise ValueError(f"Unknown mode: {cfg.mode}")
+            raise ValueError(f"Unknown offset_mode: {cfg.offset_mode}")
         
         # Step: Transform to camera coordinates
         cam_x, cam_y, cam_z = world_to_camera(x, y, z, CAMERA_POS, CAMERA_LOOKAT, CAMERA_ROLL)
@@ -387,120 +397,56 @@ def canny_test(cfg: Config):
 
 def get_camera_trajectory(t, cfg):
     """Calculate camera position along trajectory.
-    - First 95% (t < 0.95): Arc trajectory
-      Arc: center at (0, -1, 0), from (-1, -1, 0) to (0, 0, 0).
-    - Last 5% (t >= 0.95): Straight line towards x = 1.0, advancing 0.10
-    t: parameter from 0 to 1.
     Returns (camera_pos, camera_lookat) tuple."""
 
     def smooth_lookat_func(x):
-        if x <= 0.5:
-            return 4.0 / 3.0 * x * x
-        else:
-            return 4.0 / 3.0 * x - 1.0 / 3.0
+        # if z <= 0.5:
+        #     y = 4.0 / 3.0 * z * z
+        # else:
+        #     y = 4.0 / 3.0 * z - 1.0 / 3.0
+        return (1.0 - (1.0 - x) ** 3.0) * 0.8 + 0.2
 
-    arc_v = np.pi / 2 / cfg.arc_prop
+    # Arc trajectory (first 95%)
+    # Arc center
+    center = (0.0, -1.0, 0.0)
     
-    if t < cfg.arc_prop:
-        # Arc trajectory (first 95%)
-        # Arc center
-        center = (0.0, -1.0, 0.0)
-        
-        # Start and end points
-        start = (-1.0, -1.0, 0.0)
-        end = (0.0, 0.0, 0.0)
-        
-        # Calculate vectors from center
-        start_vec = (start[0] - center[0], start[1] - center[1], start[2] - center[2])
-        end_vec = (end[0] - center[0], end[1] - center[1], end[2] - center[2])
-        
-        # Calculate angles
-        start_angle = math.atan2(start_vec[1], start_vec[0])
-        end_angle = math.atan2(end_vec[1], end_vec[0])
-        
-        # Interpolate angle (scale t from [0, 0.95] to [0, 1] for arc)
-        arc_t = t / cfg.arc_prop
-        angle = start_angle + arc_t * (end_angle - start_angle)
-        
-        # Calculate radius
-        radius = math.sqrt(start_vec[0]**2 + start_vec[1]**2 + start_vec[2]**2)
-        
-        # Calculate position on arc
-        cam_pos = (
-            center[0] + radius * math.cos(angle),
-            center[1] + radius * math.sin(angle),
-            center[2]
-        )
-        
-        # Calculate lookat using smooth function f(x)
-        # f(x) = 4/3 * x^2 (x <= 0.5)
-        # f(x) = 4/3 * x - 1/3 (x > 0.5)
-        
-        # Use f(t) to calculate lookat angle (use original t, not arc_t)
-        lookat_t = smooth_lookat_func(t)
-        lookat_angle = start_angle + (end_angle - start_angle) * lookat_t
-        
-        # Calculate lookat direction from lookat_angle
-        lookat_direction = (+math.sin(lookat_angle), -math.cos(lookat_angle), 0.0)
-        lookat_distance = 1.0
-        camera_lookat = (
-            cam_pos[0] + lookat_direction[0] * lookat_distance,
-            cam_pos[1] + lookat_direction[1] * lookat_distance,
-            cam_pos[2] + lookat_direction[2] * lookat_distance
-        )
-    else:
-        # Straight line trajectory (last 5%)
-        # Calculate position at t = 0.95 (end of arc)
-        center = (0.0, -1.0, 0.0)
-        start = (-1.0, -1.0, 0.0)
-        end = (0.0, 0.0, 0.0)
-        
-        start_vec = (start[0] - center[0], start[1] - center[1], start[2] - center[2])
-        end_vec = (end[0] - center[0], end[1] - center[1], end[2] - center[2])
-        
-        start_angle = math.atan2(start_vec[1], start_vec[0])
-        end_angle = math.atan2(end_vec[1], end_vec[0])
-        
-        radius = math.sqrt(start_vec[0]**2 + start_vec[1]**2 + start_vec[2]**2)
-        angle_at_095 = start_angle + (end_angle - start_angle)  # t=0.95 corresponds to end of arc
-        
-        arc_end_pos = (
-            center[0] + radius * math.cos(angle_at_095),
-            center[1] + radius * math.sin(angle_at_095),
-            center[2]
-        )
-        
-        # Direction: straight line towards x = 1.0 (along x-axis positive direction)
-        direction_normalized = (1.0, 0.0, 0.0)
-        
-        # Interpolate along straight line: t from [0.95, 1.0] maps to distance [0, 0.10]
-        line_t = (t - cfg.arc_prop)  # line_t in [0, 1] when t in [0.95, 1.0]
-        distance = line_t * arc_v  # Advance 0.10 units total
-        
-        cam_pos = (
-            arc_end_pos[0] + direction_normalized[0] * distance,
-            arc_end_pos[1] + direction_normalized[1] * distance,
-            arc_end_pos[2] + direction_normalized[2] * distance
-        )
-        
-        # For straight line part, calculate lookat using smooth function f(t)
-        # f(x) = 4/3 * x^2 (x <= 0.5)
-        # f(x) = 4/3 * x - 1/3 (x > 0.5)
-        
-        # Use f(t) to calculate lookat angle (t is in [0.95, 1.0])
-        lookat_t = smooth_lookat_func(t)
-        lookat_angle = start_angle + (end_angle - start_angle) * lookat_t
-        
-        # Calculate lookat direction from lookat_angle
-        lookat_direction = (+math.sin(lookat_angle), -math.cos(lookat_angle), 0.0)
-        lookat_distance = 1.0
-        camera_lookat = (
-            cam_pos[0] + lookat_direction[0] * lookat_distance,
-            cam_pos[1] + lookat_direction[1] * lookat_distance,
-            cam_pos[2] + lookat_direction[2] * lookat_distance
-        )
+    # Start and end points
+    start = (-1.0, -1.0, 0.0)
+    end = (0.0, 0.0, 0.0)
     
-    print(f"cam_pos: {cam_pos}")
+    # Calculate vectors from center
+    start_vec = (start[0] - center[0], start[1] - center[1], start[2] - center[2])
+    end_vec = (end[0] - center[0], end[1] - center[1], end[2] - center[2])
+    
+    # Calculate angles
+    start_angle = math.atan2(start_vec[1], start_vec[0])
+    end_angle = math.atan2(end_vec[1], end_vec[0])
+    
+    # Interpolate angle (scale t from [0, 0.95] to [0, 1] for arc)
+
+    arc_t1 = 1.0 - t
+    ax = arc_t1 * 0.5
+    ay = 4 * ax ** 2
+    
+    # Calculate position on arc
+    cam_pos = (
+        -ax + cfg.ax_offset,
+        -ay,
+        (1.0 - t) * 0.5
+    )
+    
+    lookat_t = smooth_lookat_func(t)
+    lookat_angle = start_angle + (end_angle - start_angle) * lookat_t
+    
+    # Calculate lookat direction from lookat_angle
+    lookat_direction = (+math.sin(lookat_angle), -math.cos(lookat_angle), 0.0)
+    lookat_distance = 1.0
+    camera_lookat = (
+        cam_pos[0] + lookat_direction[0] * lookat_distance,
+        cam_pos[1] + lookat_direction[1] * lookat_distance,
+        cam_pos[2] + lookat_direction[2] * lookat_distance
+    )
+
     return cam_pos, camera_lookat
 
 def calculate_arc_length():
@@ -523,10 +469,6 @@ def calculate_arc_length():
 def get_trajectory_parameter(t, cfg: Config):
     """Calculate next trajectory parameter t based on current t and velocity profile.
     Returns (next_t, should_continue) where should_continue indicates if animation should continue.
-    
-    Velocity profile:
-    - First 70% (t < 0.7): constant velocity
-    - Last 30% (t >= 0.7): smooth deceleration to 0 at t = 1.0
     """
     if t >= 1.0:
         return 1.0, False
@@ -540,13 +482,13 @@ def get_trajectory_parameter(t, cfg: Config):
     dt = 1.0 / cfg.fps
     
     # Velocity profile
-    if t < 0.7:
+    if t < cfg.const_speed_prop:
         # Constant velocity phase (first 70%)
         velocity = base_velocity
     else:
         # Smooth deceleration phase (last 30%)
         # Map t from [0.7, 1.0] to [0, 1] for smoothstep
-        u = (t - 0.7) / 0.3  # u in [0, 1] when t in [0.7, 1.0]
+        u = (t - cfg.const_speed_prop) / (1.0 - cfg.const_speed_prop)  # u in [0, 1] when t in [cfg.const_speed_prop, 1.0]
         
         # Apply deceleration_rate to control decay speed
         # Higher rate (>1.0) = faster decay (steeper curve)
@@ -606,27 +548,32 @@ def render(cfg: Config):
         world_z = -(img_y - img_height / 2) * scale_z
         
         # Apply offset based on offset_mode
+
+        bx = cfg.base_x
         if cfg.offset_mode == "fix":
-            x = 2.0
+            x = bx
         elif cfg.offset_mode == "x":
-            x = random.uniform(2.0 - cfg.offset_radius, 2.0 + cfg.offset_radius)
+            x = random.uniform(bx - cfg.offset_radius, bx + cfg.offset_radius)
         elif cfg.offset_mode == "ray":
             # Base position at x=2.0
-            base_x = 2.0
             # Calculate direction vector from origin to base position
-            direction = math.sqrt(base_x**2 + world_y**2 + world_z**2)
-            if direction > 0:
-                # Normalize direction vector
-                dir_x = base_x / direction
-                dir_y = world_y / direction
-                dir_z = world_z / direction
-                # Move along ray by random distance between -offset_radius and offset_radius
-                offset = random.uniform(-cfg.offset_radius, cfg.offset_radius)
-                x = base_x + dir_x * offset
-                world_y = world_y + dir_y * offset
-                world_z = world_z + dir_z * offset
+            ood = np.random.random() <= cfg.offset_ood_prop
+            if ood:
+                close = np.random.random() <= cfg.offset_ood_close_prop
+                x = bx + random.uniform(-cfg.offset_radius_ood * (0.1 if close else 1.0), 0)
             else:
-                x = base_x
+                direction = math.sqrt(bx**2 + world_y**2 + world_z**2)
+                if direction > 0:
+                    # Normalize direction vector
+                    dir_x = bx / direction
+                    dir_y = world_y / direction
+                    dir_z = world_z / direction
+                    offset = random.uniform(-cfg.offset_radius, cfg.offset_radius)
+                    x = bx + dir_x * offset
+                    world_y = world_y + dir_y * offset
+                    world_z = world_z + dir_z * offset
+                else:
+                    x = bx 
         else:
             raise ValueError(f"Unknown offset_mode: {cfg.offset_mode}")
         
@@ -665,7 +612,7 @@ def render(cfg: Config):
     
     # Animation loop
     frame_count = 0
-    t = 0.96  # Start at beginning of trajectory
+    t = 0.0  # Start at beginning of trajectory
     
     print("Rendering frames...")
     
@@ -699,14 +646,18 @@ def render(cfg: Config):
             result = project_3d_to_2d(cam_x, cam_y, cam_z, cfg)
             if result:
                 px, py = result
-                
-                # Scale radius based on distance
+
+                distance = distance if distance >= cfg.sup else cfg.sup - (cfg.sup - distance) * 0.3
                 if obj['is_ellipse']:
                     radius = (obj['d'] * obj['eccentricity']) / distance
+                    if max(-px, -py, px - cfg.width, py - cfg.height) > radius * cfg.halo_radius_multiplier:
+                        continue
                     draw_blurred_ellipse(cr, px, py, radius, obj['eccentricity'], 
                                        obj['rotation'], cfg, obj['color_type'], obj['weight'])
                 else:
                     radius = obj['d'] / distance
+                    if max(-px, -py, px - cfg.width, py - cfg.height) > radius * cfg.halo_radius_multiplier:
+                        continue
                     draw_blurred_circle(cr, px, py, radius, cfg, obj['color_type'], obj['weight'])
         
         # Convert Cairo surface to numpy array for OpenCV
@@ -716,13 +667,18 @@ def render(cfg: Config):
         
         # Convert ARGB to BGR for OpenCV
         bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+
+        # imwrite
+        if cfg.fps == 1:
+            cv2.imwrite(f"render.png", bgr)
+            break
         
         # Write frame
         video_writer.write(bgr)
         
         frame_count += 1
         
-        if frame_count % 10 == 0:
+        if frame_count % 3 == 0:
             print(f"Rendered frame {frame_count}, t={t:.3f}")
         
         # Check if we should stop
