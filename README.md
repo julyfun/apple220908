@@ -73,3 +73,8 @@ def draw_blurred_circle(cr, x, y, radius, blur=BLUR_AMOUNT):
 \[
 S = \{ \mathbf{p}_i \mid i = 1, 2, \ldots, 100 \}, \quad \mathbf{p}_i \in \bigcup_{j=1}^{4} \text{Edge}_j
 \]
+
+## 移动（因为看起来在空间中散布）
+
+- [ ] 需要生成一个平面视频，说明效果不好
+

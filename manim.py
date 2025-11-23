@@ -468,3 +468,459 @@ class Projection(ThreeDScene):
         self.play(t_tracker.animate.set_value(2), run_time=2.5, rate_func=linear)
         self.wait(1)
 
+class Projection2(ThreeDScene):
+    def construct(self):
+        axes = ThreeDAxes(
+            x_range=[-0.5, 3, 0.5],
+            y_range=[-2.5, 2.5, 0.5],
+            z_range=[-2.5, 2.5, 0.5],
+            x_length=7,
+            y_length=5,
+            z_length=5,
+        )
+        
+        self.set_camera_orientation(phi=70 * DEGREES, theta=-45 * DEGREES)
+        
+        # Camera at origin
+        camera = Dot3D(point=axes.c2p(0, 0, 0), color=RED, radius=0.15)
+        
+        # Square at x=2 (far)
+        square_x = 2.0
+        square_size = 2.0
+        square_center = axes.c2p(square_x, 0, 0)
+        
+        # Square vertices
+        vertices = [
+            axes.c2p(square_x, -square_size/2, square_size/2),   # Top-left
+            axes.c2p(square_x, square_size/2, square_size/2),   # Top-right
+            axes.c2p(square_x, square_size/2, -square_size/2),  # Bottom-right
+            axes.c2p(square_x, -square_size/2, -square_size/2), # Bottom-left
+        ]
+        
+        square = Polygon(*vertices, color=BLUE, stroke_width=3)
+        
+        # Projection plane close to camera
+        plane_x = 0.3
+        projection_plane = Rectangle(
+            width=0.8, height=0.8, 
+            color=GREEN, 
+            fill_opacity=0.1,
+            stroke_width=3
+        )
+        projection_plane.rotate(PI/2, axis=UP)
+        projection_plane.move_to(axes.c2p(plane_x, 0, 0))
+        
+        self.play(Create(axes), FadeIn(camera), Create(square), Create(projection_plane))
+        self.wait(1)
+        
+        # Sample 32 points uniformly on square edges (8 points per edge)
+        points_per_edge = 8
+        sample_points_3d = []
+        sample_dots = VGroup()
+        
+        # Top edge: y varies, z = 0.5
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge  # [0, 1]
+            y_norm = -0.5 + t  # [-0.5, 0.5]
+            point_3d = axes.c2p(square_x, y_norm * square_size, 0.5 * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Right edge: y = 0.5, z varies
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge  # [0, 1]
+            z_norm = 0.5 - t  # [0.5, -0.5]
+            point_3d = axes.c2p(square_x, 0.5 * square_size, z_norm * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Bottom edge: y varies, z = -0.5
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge  # [0, 1]
+            y_norm = 0.5 - t  # [0.5, -0.5]
+            point_3d = axes.c2p(square_x, y_norm * square_size, -0.5 * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Left edge: y = -0.5, z varies
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge  # [0, 1]
+            z_norm = -0.5 + t  # [-0.5, 0.5]
+            point_3d = axes.c2p(square_x, -0.5 * square_size, z_norm * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Show sample points
+        self.play(FadeIn(sample_dots, lag_ratio=0.1), run_time=1.5)
+        self.wait(0.5)
+        
+        # Project points to plane
+        def project_point(point_3d):
+            coords = axes.p2c(point_3d)
+            if coords[0] <= 0:
+                return None
+            scale = plane_x / coords[0]
+            proj_coords = [plane_x, coords[1] * scale, coords[2] * scale]
+            return axes.c2p(*proj_coords)
+        
+        projected_dots = VGroup()
+        rays = VGroup()
+        
+        for point_3d in sample_points_3d:
+            coords = axes.p2c(point_3d)
+            if coords[0] > 0:  # Check before projecting
+                proj_point = project_point(point_3d)
+                proj_dot = Dot3D(point=proj_point, color=GREEN, radius=0.1/3)
+                projected_dots.add(proj_dot)
+                
+                ray = Line3D(
+                    axes.c2p(0, 0, 0),
+                    point_3d,
+                    color=WHITE,
+                    stroke_width=0.1,
+                    stroke_opacity=0.6
+                )
+                rays.add(ray)
+        
+        # Draw rays
+        self.play(Create(rays), run_time=1.5)
+        self.wait(0.5)
+        
+        # Show projected points
+        self.play(FadeIn(projected_dots, lag_ratio=0.05), run_time=1)
+        self.wait(1)
+        
+        # Highlight projected square shape
+        # Get projected points in order (top-left, top-right, bottom-right, bottom-left)
+        proj_corners = []
+        for vertex in vertices:
+            coords = axes.p2c(vertex)
+            if coords[0] > 0:
+                proj_corners.append(project_point(vertex))
+        
+        if len(proj_corners) == 4:
+            proj_square = Polygon(*proj_corners, color=YELLOW, stroke_width=4, fill_opacity=0.1)
+            self.play(Create(proj_square), run_time=1)
+            self.wait(1)
+        
+        # Fade out camera for close-up
+        self.play(FadeOut(camera))
+        self.wait(0.3)
+        
+        # Switch to camera POV: move camera to origin and look at projection plane
+        self.move_camera(
+            frame_center=(0, 0, 0),
+            phi=90 * DEGREES,
+            theta=180 * DEGREES,
+            zoom=4,
+            run_time=2.5
+        )
+        self.wait(1)
+        
+        # Move camera back to original view
+        self.move_camera(
+            phi=70 * DEGREES,
+            theta=-45 * DEGREES,
+            zoom=1,
+            run_time=2
+        )
+        self.wait(0.5)
+        
+        # Add random x-offset for each point
+        import random
+        random.seed(42)
+        x_offsets = [random.uniform(-0.5, 0.5) for _ in range(len(sample_points_3d))]
+        x_offset_tracker = ValueTracker(0)
+        
+        def get_offset_point(idx):
+            original_point = sample_points_3d[idx]
+            coords = axes.p2c(original_point)
+            offset = x_offsets[idx] * x_offset_tracker.get_value()
+            return axes.c2p(coords[0] + offset, coords[1], coords[2])
+        
+        # Update sample dots with offset
+        sample_dots_offset = VGroup()
+        for i in range(len(sample_points_3d)):
+            dot = always_redraw(
+                lambda idx=i: Dot3D(point=get_offset_point(idx), color=YELLOW, radius=0.08)
+            )
+            sample_dots_offset.add(dot)
+        
+        # Update rays with offset
+        rays_offset = VGroup()
+        for i in range(len(sample_points_3d)):
+            coords = axes.p2c(sample_points_3d[i])
+            if coords[0] > 0:
+                ray = always_redraw(
+                    lambda idx=i: Line3D(
+                        axes.c2p(0, 0, 0),
+                        get_offset_point(idx),
+                        color=WHITE,
+                        stroke_width=0.1,
+                        stroke_opacity=0.6
+                    )
+                )
+                rays_offset.add(ray)
+        
+        # Update projected dots with offset
+        projected_dots_offset = VGroup()
+        for i in range(len(sample_points_3d)):
+            coords = axes.p2c(sample_points_3d[i])
+            if coords[0] > 0:
+                def get_offset_projected(idx):
+                    offset_point = get_offset_point(idx)
+                    offset_coords = axes.p2c(offset_point)
+                    if offset_coords[0] <= 0:
+                        return axes.c2p(plane_x, 0, 0)
+                    scale = plane_x / offset_coords[0]
+                    proj_coords = [plane_x, offset_coords[1] * scale, offset_coords[2] * scale]
+                    return axes.c2p(*proj_coords)
+                
+                proj_dot = always_redraw(
+                    lambda idx=i: Dot3D(point=get_offset_projected(idx), color=GREEN, radius=0.1/3)
+                )
+                projected_dots_offset.add(proj_dot)
+        
+        # Replace old elements with offset versions
+        self.remove(sample_dots, rays, projected_dots)
+        self.add(sample_dots_offset, rays_offset, projected_dots_offset)
+        self.wait(0.3)
+        
+        # Animate points moving
+        self.play(x_offset_tracker.animate.set_value(1), run_time=2, rate_func=linear)
+        self.wait(0.5)
+        
+        # Switch to close-up again
+        self.move_camera(
+            frame_center=(0, 0, 0),
+            phi=90 * DEGREES,
+            theta=180 * DEGREES,
+            zoom=4,
+            run_time=2.5
+        )
+        self.wait(0.5)
+        
+        # Hide rays and original points, keep only projected points
+        self.play(
+            FadeOut(rays_offset, sample_dots_offset),
+            run_time=1
+        )
+        self.wait(1)
+
+class Projection3(ThreeDScene):
+    def construct(self):
+        axes = ThreeDAxes(
+            x_range=[-0.5, 3, 0.5],
+            y_range=[-2.5, 2.5, 0.5],
+            z_range=[-2.5, 2.5, 0.5],
+            x_length=7,
+            y_length=5,
+            z_length=5,
+        )
+        
+        self.set_camera_orientation(phi=70 * DEGREES, theta=-45 * DEGREES)
+        
+        # Camera at origin
+        camera = Dot3D(point=axes.c2p(0, 0, 0), color=RED, radius=0.15)
+        
+        # Square at x=2 (far)
+        square_x = 2.0
+        square_size = 2.0
+        
+        # Square vertices
+        vertices = [
+            axes.c2p(square_x, -square_size/2, square_size/2),   # Top-left
+            axes.c2p(square_x, square_size/2, square_size/2),   # Top-right
+            axes.c2p(square_x, square_size/2, -square_size/2),  # Bottom-right
+            axes.c2p(square_x, -square_size/2, -square_size/2), # Bottom-left
+        ]
+        
+        square = Polygon(*vertices, color=BLUE, stroke_width=3)
+        
+        # Projection plane close to camera
+        plane_x = 0.3
+        projection_plane = Rectangle(
+            width=0.8, height=0.8, 
+            color=GREEN, 
+            fill_opacity=0.1,
+            stroke_width=3
+        )
+        projection_plane.rotate(PI/2, axis=UP)
+        projection_plane.move_to(axes.c2p(plane_x, 0, 0))
+        
+        self.play(Create(axes), FadeIn(camera), Create(square), Create(projection_plane))
+        self.wait(0.5)
+        
+        # Sample 32 points uniformly on square edges (8 points per edge)
+        points_per_edge = 8
+        sample_points_3d = []
+        sample_dots = VGroup()
+        
+        # Top edge: y varies, z = 0.5
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge
+            y_norm = -0.5 + t
+            point_3d = axes.c2p(square_x, y_norm * square_size, 0.5 * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Right edge: y = 0.5, z varies
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge
+            z_norm = 0.5 - t
+            point_3d = axes.c2p(square_x, 0.5 * square_size, z_norm * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Bottom edge: y varies, z = -0.5
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge
+            y_norm = 0.5 - t
+            point_3d = axes.c2p(square_x, y_norm * square_size, -0.5 * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Left edge: y = -0.5, z varies
+        for i in range(points_per_edge):
+            t = (i + 0.5) / points_per_edge
+            z_norm = -0.5 + t
+            point_3d = axes.c2p(square_x, -0.5 * square_size, z_norm * square_size)
+            sample_points_3d.append(point_3d)
+            dot = Dot3D(point=point_3d, color=YELLOW, radius=0.08)
+            sample_dots.add(dot)
+        
+        # Show sample points immediately
+        self.add(sample_dots)
+        self.wait(0.5)
+        
+        # Project points to plane
+        def project_point(point_3d):
+            coords = axes.p2c(point_3d)
+            if coords[0] <= 0:
+                return None
+            scale = plane_x / coords[0]
+            proj_coords = [plane_x, coords[1] * scale, coords[2] * scale]
+            return axes.c2p(*proj_coords)
+        
+        # Create rays and projected dots
+        rays = VGroup()
+        projected_dots = VGroup()
+        
+        for point_3d in sample_points_3d:
+            coords = axes.p2c(point_3d)
+            if coords[0] > 0:
+                proj_point = project_point(point_3d)
+                proj_dot = Dot3D(point=proj_point, color=GREEN, radius=0.1/3)
+                projected_dots.add(proj_dot)
+                
+                ray = Line3D(
+                    axes.c2p(0, 0, 0),
+                    point_3d,
+                    color=WHITE,
+                    stroke_width=0.1,
+                    stroke_opacity=0.6
+                )
+                rays.add(ray)
+        
+        self.play(Create(rays), FadeIn(projected_dots, lag_ratio=0.05), run_time=1)
+        self.wait(0.5)
+        
+        # Add random offset along ray direction for each point
+        import random
+        random.seed(42)
+        ray_offsets = [random.uniform(-0.5, 0.5) for _ in range(len(sample_points_3d))]
+        ray_offset_tracker = ValueTracker(0)
+        
+        def get_ray_offset_point(idx):
+            original_point = sample_points_3d[idx]
+            original_coords = axes.p2c(original_point)
+            camera_coords = np.array([0, 0, 0])
+            point_coords = np.array(original_coords)
+            
+            # Ray direction vector (normalized)
+            ray_dir = point_coords - camera_coords
+            ray_length = np.linalg.norm(ray_dir)
+            if ray_length > 0:
+                ray_dir_normalized = ray_dir / ray_length
+                offset = ray_offsets[idx] * ray_offset_tracker.get_value()
+                new_coords = point_coords + ray_dir_normalized * offset
+                return axes.c2p(*new_coords)
+            return original_point
+        
+        # Update sample dots with ray offset
+        sample_dots_offset = VGroup()
+        for i in range(len(sample_points_3d)):
+            dot = always_redraw(
+                lambda idx=i: Dot3D(point=get_ray_offset_point(idx), color=YELLOW, radius=0.08)
+            )
+            sample_dots_offset.add(dot)
+        
+        # Update rays with offset
+        rays_offset = VGroup()
+        for i in range(len(sample_points_3d)):
+            coords = axes.p2c(sample_points_3d[i])
+            if coords[0] > 0:
+                ray = always_redraw(
+                    lambda idx=i: Line3D(
+                        axes.c2p(0, 0, 0),
+                        get_ray_offset_point(idx),
+                        color=WHITE,
+                        stroke_width=0.1,
+                        stroke_opacity=0.6
+                    )
+                )
+                rays_offset.add(ray)
+        
+        # Update projected dots with offset
+        projected_dots_offset = VGroup()
+        for i in range(len(sample_points_3d)):
+            coords = axes.p2c(sample_points_3d[i])
+            if coords[0] > 0:
+                def get_ray_offset_projected(idx):
+                    offset_point = get_ray_offset_point(idx)
+                    offset_coords = axes.p2c(offset_point)
+                    if offset_coords[0] <= 0:
+                        return axes.c2p(plane_x, 0, 0)
+                    scale = plane_x / offset_coords[0]
+                    proj_coords = [plane_x, offset_coords[1] * scale, offset_coords[2] * scale]
+                    return axes.c2p(*proj_coords)
+                
+                proj_dot = always_redraw(
+                    lambda idx=i: Dot3D(point=get_ray_offset_projected(idx), color=GREEN, radius=0.1/3)
+                )
+                projected_dots_offset.add(proj_dot)
+        
+        # Replace with offset versions
+        self.remove(sample_dots, rays, projected_dots)
+        self.add(sample_dots_offset, rays_offset, projected_dots_offset)
+        self.wait(0.3)
+        
+        # Animate points moving along ray direction
+        self.play(ray_offset_tracker.animate.set_value(1), run_time=2, rate_func=linear)
+        self.wait(0.5)
+        
+        # Switch to camera POV
+        self.play(FadeOut(camera))
+        self.move_camera(
+            frame_center=(0, 0, 0),
+            phi=90 * DEGREES,
+            theta=180 * DEGREES,
+            zoom=4,
+            run_time=2.5
+        )
+        self.wait(0.5)
+        
+        # Hide rays and original points, keep only projected points
+        self.play(
+            FadeOut(rays_offset, sample_dots_offset),
+            run_time=1
+        )
+        self.wait(1)
+
