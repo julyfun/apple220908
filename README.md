@@ -1,3 +1,8 @@
+## How to run?
+
+1. install uv
+2. see `go.bash` for example command.
+
 ## 模糊边缘的数学原理
 
 ```python
