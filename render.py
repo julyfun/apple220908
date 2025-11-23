@@ -9,7 +9,7 @@ import tyro
 from dataclasses import dataclass
 
 # Camera transform (position, lookat, roll) - kept for cam_test only
-CAMERA_POS = (0.0, 0.5, 0.5)  # Camera position (x, y, z) relative to world origin
+CAMERA_POS = (0.0, 1.5, 1.5)  # Camera position (x, y, z) relative to world origin
 CAMERA_LOOKAT = (2.0, 0.0, 0.0)  # Point camera is looking at (x, y, z)
 CAMERA_ROLL = 0.0  # Roll angle in radians (rotation around forward axis, 0 = horizontal)
 
@@ -34,8 +34,8 @@ class Config:
     # Rendering parameters
     blur_amount: float = 0.3
     halo: bool = False
-    halo_radius_multiplier: float = 8
-    halo_intensity: float = 0.015
+    halo_radius_multiplier: float = 11
+    halo_intensity: float = 0.02
     
     # Camera parameters
     fov_h: float = 45.0  # degrees
@@ -56,6 +56,8 @@ class Config:
     deceleration_rate: float = 5.0  # Deceleration rate for last 30% (1.0 = normal, >1.0 = faster, <1.0 = slower)
     ax_offset: float = 0.12
     sup: float = 1.0 # Avoid too big
+
+    out: str = "1.mp4"
     
     def __post_init__(self):
         """Calculate derived values."""
@@ -400,10 +402,6 @@ def get_camera_trajectory(t, cfg):
     Returns (camera_pos, camera_lookat) tuple."""
 
     def smooth_lookat_func(x):
-        # if z <= 0.5:
-        #     y = 4.0 / 3.0 * z * z
-        # else:
-        #     y = 4.0 / 3.0 * z - 1.0 / 3.0
         return (1.0 - (1.0 - x) ** 3.0) * 0.8 + 0.2
 
     # Arc trajectory (first 95%)
@@ -425,7 +423,7 @@ def get_camera_trajectory(t, cfg):
     # Interpolate angle (scale t from [0, 0.95] to [0, 1] for arc)
 
     arc_t1 = 1.0 - t
-    ax = arc_t1 * 0.5
+    ax = (arc_t1 ** 0.5) * 0.5
     ay = 4 * ax ** 2
     
     # Calculate position on arc
@@ -605,14 +603,14 @@ def render(cfg: Config):
     
     # Setup video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video_writer = cv2.VideoWriter('render.mp4', fourcc, cfg.fps, (cfg.width, cfg.height))
+    video_writer = cv2.VideoWriter(cfg.out, fourcc, cfg.fps, (cfg.width, cfg.height))
     
     if not video_writer.isOpened():
         raise RuntimeError("Failed to open video writer")
     
     # Animation loop
     frame_count = 0
-    t = 0.0  # Start at beginning of trajectory
+    t = 0.0 if cfg.fps > 1 else 0.999  # Start at beginning of trajectory
     
     print("Rendering frames...")
     
@@ -686,7 +684,7 @@ def render(cfg: Config):
             break
     
     video_writer.release()
-    print(f"Rendered {frame_count} frames to render.mp4")
+    print(f"Rendered {frame_count} frames to {cfg.out}")
 
 def main():
     """Main entry point."""

@@ -6,3 +6,5 @@
 __pycache__
 ignore*
 media/
+*.mp4
+*.pptx
