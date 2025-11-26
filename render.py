@@ -26,8 +26,8 @@ class Config:
     # Object parameters
     num_objects: int = 100
     d_min: float = 0.6
-    d_max: float = 4.5
-    d_threshold: float = 1.0  # Will be calculated as d_min * 1.25 if not set
+    d_max: float = 5.5
+    d_threshold: float = 2.0  # Will be calculated as d_min * 1.25 if not set
     eccentricity_min: float = 1.05
     eccentricity_max: float = 1.25
     
@@ -36,6 +36,7 @@ class Config:
     halo: bool = False
     halo_radius_multiplier: float = 11
     halo_intensity: float = 0.02
+    blue_prop: float = 0.66
     
     # Camera parameters
     fov_h: float = 45.0  # degrees
@@ -47,14 +48,20 @@ class Config:
     init_v: float = 0.3  # Initial velocity
     base_x: float = 2.0
     offset_mode: str = "ray"  # fix, x, or ray
-    offset_radius: float = 1.8  # Offset radius for x and ray modes
-    offset_ood_prop: float = 0.8
+    offset_to_cam: float = 0.8  # Offset radius for x and ray modes
+    offset_away: float = 3.8  # Offset radius for x and ray modes
+    offset_ood_prop: float = 0.80
     offset_ood_close_prop: float = 0.3
-    offset_radius_ood: float = 4.0  # Offset radius for x and ray modes
+    offset_ood_close_to_cam: float = 0.15
+    offset_ood_to_cam: float = 4.5  # Offset radius for x and ray modes
+    offset_ood_far_prop: float = 0.03  # Offset radius for x and ray modes
+    offset_ood_far_away: float = 35.0  # Offset radius for x and ray modes
 
     const_speed_prop: float = 0.5
     deceleration_rate: float = 5.0  # Deceleration rate for last 30% (1.0 = normal, >1.0 = faster, <1.0 = slower)
     ax_offset: float = 0.12
+    start_rot: float = 0.0
+    start_z: float = 0.7
     sup: float = 1.0 # Avoid too big
 
     out: str = "1.mp4"
@@ -125,6 +132,12 @@ def draw_blurred_ellipse(cr, x, y, radius, eccentricity, rotation, cfg: Config, 
     cr.paint()
     
     cr.restore()
+
+def vec(*a):
+    return np.array(a)
+
+def normalized(v: np.ndarray):
+    return v / np.linalg.norm(v)
 
 def normalize(v):
     """Normalize a 3D vector."""
@@ -241,7 +254,7 @@ def cam_test(cfg: Config):
     for _ in range(cfg.num_objects):
         # Step: Generate point attributes first
         d = random.uniform(cfg.d_min, cfg.d_max)
-        color_type = "yellow" if random.random() < 0.66 else "blue"
+        color_type = "blue" if random.random() < cfg.blue_prop else "yellow"
         weight = random.random()
         is_ellipse = d > cfg.d_threshold
         if is_ellipse:
@@ -329,7 +342,7 @@ def glow_test(cfg: Config):
         d = random.uniform(cfg.d_min, cfg.d_max)
         
         radius = d
-        color_type = "yellow" if random.random() < 0.66 else "blue"
+        color_type = "blue" if random.random() < cfg.blue_prop else "yellow"
         weight = random.random()
         
         if d <= cfg.d_threshold:
@@ -402,7 +415,7 @@ def get_camera_trajectory(t, cfg):
     Returns (camera_pos, camera_lookat) tuple."""
 
     def smooth_lookat_func(x):
-        return (1.0 - (1.0 - x) ** 3.0) * 0.8 + 0.2
+        return (1.0 - (1.0 - x) ** 1.5) * (1.0 - cfg.start_rot) + cfg.start_rot
 
     # Arc trajectory (first 95%)
     # Arc center
@@ -430,7 +443,7 @@ def get_camera_trajectory(t, cfg):
     cam_pos = (
         -ax + cfg.ax_offset,
         -ay,
-        (1.0 - t) * 0.5
+        (1.0 - t) * cfg.start_z
     )
     
     lookat_t = smooth_lookat_func(t)
@@ -538,7 +551,7 @@ def render(cfg: Config):
     scale_y = 1.0 / img_width * cfg.img_scale # Scale to [-0.5, 0.5] range
     scale_z = 1.0 / img_height * cfg.img_scale
     
-    world_points = []
+    world_points = [] # x, y, z, ood_close
     for img_x, img_y in sampled_points:
         # Map image coordinates to world coordinates
         # Center at (2.0, 0, 0) with y and z from image
@@ -551,14 +564,25 @@ def render(cfg: Config):
         if cfg.offset_mode == "fix":
             x = bx
         elif cfg.offset_mode == "x":
-            x = random.uniform(bx - cfg.offset_radius, bx + cfg.offset_radius)
+            x = random.uniform(bx - cfg.offset_to_cam, bx + cfg.offset_away)
         elif cfg.offset_mode == "ray":
             # Base position at x=2.0
             # Calculate direction vector from origin to base position
             ood = np.random.random() <= cfg.offset_ood_prop
             if ood:
                 close = np.random.random() <= cfg.offset_ood_close_prop
-                x = bx + random.uniform(-cfg.offset_radius_ood * (0.1 if close else 1.0), 0)
+                far = not close and np.random.random() <= cfg.offset_ood_far_prop + cfg.offset_ood_close_prop
+                if close:
+                    sx = random.uniform(-cfg.offset_ood_close_to_cam, 0)
+                elif far:
+                    sx = random.uniform(0, cfg.offset_ood_far_away)
+                else:
+                    sx = random.uniform(-cfg.offset_ood_to_cam, 0)
+
+                theta = random.random() * np.pi / 2
+                dir = np.cos(theta) * -normalized(vec(0, world_y, world_z)) + np.sin(theta) * vec(1, 0, 0)
+                pt = vec(bx, world_y, world_z) + sx * dir
+                world_points.append(tuple(pt.tolist() + [close]))
             else:
                 direction = math.sqrt(bx**2 + world_y**2 + world_z**2)
                 if direction > 0:
@@ -566,22 +590,22 @@ def render(cfg: Config):
                     dir_x = bx / direction
                     dir_y = world_y / direction
                     dir_z = world_z / direction
-                    offset = random.uniform(-cfg.offset_radius, cfg.offset_radius)
+                    offset = random.uniform(-cfg.offset_to_cam, cfg.offset_away)
                     x = bx + dir_x * offset
                     world_y = world_y + dir_y * offset
                     world_z = world_z + dir_z * offset
                 else:
                     x = bx 
+                world_points.append((x, world_y, world_z, False))
         else:
             raise ValueError(f"Unknown offset_mode: {cfg.offset_mode}")
         
-        world_points.append((x, world_y, world_z))
     
     # Generate object attributes for each point
     objects = []
-    for x, y, z in world_points:
+    for x, y, z, ood_close in world_points:
         d = random.uniform(cfg.d_min, cfg.d_max)
-        color_type = "yellow" if random.random() < 0.66 else "blue"
+        color_type = "yellow" if random.random() < cfg.blue_prop else "blue"
         weight = random.random()
         is_ellipse = d > cfg.d_threshold
         if is_ellipse:
@@ -598,7 +622,8 @@ def render(cfg: Config):
             'weight': weight,
             'is_ellipse': is_ellipse,
             'eccentricity': eccentricity,
-            'rotation': rotation
+            'rotation': rotation,
+            'ood_close': ood_close
         })
     
     # Setup video writer
@@ -648,12 +673,16 @@ def render(cfg: Config):
                 distance = distance if distance >= cfg.sup else cfg.sup - (cfg.sup - distance) * 0.3
                 if obj['is_ellipse']:
                     radius = (obj['d'] * obj['eccentricity']) / distance
+                    if obj['ood_close']:
+                        radius = radius * max(0, 2.0 * t - 1.0) * 0.7
                     if max(-px, -py, px - cfg.width, py - cfg.height) > radius * cfg.halo_radius_multiplier:
                         continue
                     draw_blurred_ellipse(cr, px, py, radius, obj['eccentricity'], 
                                        obj['rotation'], cfg, obj['color_type'], obj['weight'])
                 else:
                     radius = obj['d'] / distance
+                    if obj['ood_close']:
+                        radius = radius * max(0, 2.0 * t - 1.0) * 0.7
                     if max(-px, -py, px - cfg.width, py - cfg.height) > radius * cfg.halo_radius_multiplier:
                         continue
                     draw_blurred_circle(cr, px, py, radius, cfg, obj['color_type'], obj['weight'])

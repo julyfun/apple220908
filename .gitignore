@@ -8,3 +8,5 @@ ignore*
 media/
 *.mp4
 *.pptx
+/render.png
+
